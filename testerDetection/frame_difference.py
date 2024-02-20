@@ -3,8 +3,6 @@ import numpy as np
 from argparse import ArgumentParser
 import pathlib
 import time
-import cv2
-import time
 
 
 def frame_difference2(filename):
@@ -17,8 +15,8 @@ def frame_difference2(filename):
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     # Setup VideoWriter to save the output
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter('processed_output.mp4', fourcc, fps, (frame_width, frame_height))
+    # fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    # out = cv2.VideoWriter('processed_output.mp4', fourcc, fps, (frame_width, frame_height))
 
     # Calculate the end frame number for 30 minutes
     end_frame_number = 30 * 60 * fps  # 30 minutes * 60 seconds * FPS
@@ -33,6 +31,9 @@ def frame_difference2(filename):
     ret, prev_frame = cap.read()
     prev_frame_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY) if ret else None
 
+    min_area = 5000
+    current_state = 0
+
     while ret and frame_count < end_frame_number:
         # Increment frame count
         frame_count += 1
@@ -42,34 +43,69 @@ def frame_difference2(filename):
         if not ret:
             break  # Break the loop if there are no more frames
 
-        # Process the frame
+        #finding absolute difference
         current_frame_gray = cv2.cvtColor(current_frame, cv2.COLOR_BGR2GRAY)
         frame_diff = cv2.absdiff(current_frame_gray, prev_frame_gray)
-        _, thresh_diff = cv2.threshold(frame_diff, 150, 255, cv2.THRESH_BINARY)
+        _, thresh_diff = cv2.threshold(frame_diff, 50, 255, cv2.THRESH_BINARY)
+
+        #contouring
+        contours, _ = cv2.findContours(thresh_diff, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Process the frame
+        significant_change_threshold = (frame_width * frame_height) * 0.001
+        significant_change_detected = False
+
+        for contour in contours:
+            if cv2.contourArea(contour) > min_area:
+                significant_change_detected = True
+                x, y, w, h = cv2.boundingRect(contour)
+                # Draw the rectangle on the current frame to visualize the change
+                cv2.rectangle(current_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)  # Green rectangle
+
+        nonzero_pixels = cv2.countNonZero(thresh_diff)
 
         # Determine state based on the frame difference
-        display_text = 'State 3: Frame Changed' if cv2.countNonZero(thresh_diff) > 0 else 'State 4: Frame Unchanged'
+        if nonzero_pixels > significant_change_threshold and significant_change_detected:
+            if current_state == 0:
+                current_state = 1
+            else:
+                current_state = 0
+        else:
+            prev_frame_gray = current_frame_gray
+
+        if current_state == 1:
+            display_text = 'State 3: Human Needed'
+            print("changed")
+            text_color = (0, 255, 0)
+        else:
+            display_text = 'State 4: Human not Needed'
+            text_color = (0, 0, 255)
+
+        # if display_text == 'State 3: Frame Changed':
+        #     text_color = (0, 255, 0)
+        # else:
+        #     text_color = (0, 0, 255)
 
         # Prepare the frame for display and output file
         thresh_diff_bgr = cv2.cvtColor(thresh_diff, cv2.COLOR_GRAY2BGR)
         concatenated_frame = cv2.hconcat([current_frame, thresh_diff_bgr])
-        cv2.putText(concatenated_frame, display_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(concatenated_frame, display_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
 
         # Show the frame
         cv2.imshow('Original and Significant Changes', concatenated_frame)
 
         # Write the frame to the output file
-        out.write(concatenated_frame)
+        # out.write(concatenated_frame)
 
         # Update the previous frame
-        prev_frame_gray = current_frame_gray
+        # prev_frame_gray = current_frame_gray
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     # Cleanup
     cap.release()
-    out.release()
+    # out.release()
     cv2.destroyAllWindows()
 
 
@@ -87,6 +123,7 @@ def frame_difference(args):
     last_state = None
     unchanged_start_time = None
     display_text = ''
+    text_color = set()
 
     while True:
         # Read the next frame
@@ -109,15 +146,18 @@ def frame_difference(args):
                 elapsed_time = time.time() - unchanged_start_time
                 print(f"{current_state} after {elapsed_time:.2f} seconds of no change.")
                 display_text = (f"{current_state} after {elapsed_time:.2f} seconds of no change.")
+                text_color = (0, 255, 0)
         else:
             current_state = 'State 4: Frame Unchanged'
             if last_state != 'State 4: Frame Unchanged':
                 # Capture the start time of the unchanged state
                 unchanged_start_time = time.time()
                 print(current_state)
-            display_text = current_state
+                display_text = current_state
+                text_color = (0, 0, 255)
 
         last_state = current_state
+
 
 
         # Convert the thresholded difference back to BGR to concatenate with the original color frame
@@ -130,7 +170,7 @@ def frame_difference(args):
         concatenated_frame = cv2.hconcat([current_frame, thresh_diff_bgr_resized])
 
         # Display the state on the concatenated frame
-        cv2.putText(concatenated_frame, display_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(concatenated_frame, display_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
 
         # Display the concatenated frame
         cv2.imshow('Original and Significant Changes', concatenated_frame)
