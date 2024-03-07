@@ -104,7 +104,7 @@ class MQTTBroker(object):
 
 class MQTTForwarding(PluginModule):
     component_name = 'mqtt-forward'
-    subscribe_channels = ['tester.*.response', 'tester.*.alert-response']
+    subscribe_channels = ['tester.*.response', 'tester.*.alert-response', 'tester.*.status']
 
     def __init__ (self, redis_conn, args, **kw):
         self.redis_conn = redis_conn
@@ -118,13 +118,21 @@ class MQTTForwarding(PluginModule):
                 self._process_response_msg(ch.split('.')[1], msg)
             elif fnmatch.fnmatch(ch, 'tester.*.alert-response'):
                 self._process_alert_response_msg(ch.split('.')[1], msg)
+            elif fnmatch.fnmatch(ch, 'tester.*.status'):
+                self._process_status_msg(ch.split('.')[1], msg)
     
+    '''FIXME all process msg need to modify to meet MQTT format'''
+
     def _process_response_msg (self, vid, msg):
         ''' process normal response msg'''
         self.mqtt.publish(msg)
 
     def _process_alert_response_msg (self, vid, msg):
         ''' process alert response msg '''
+        self.mqtt.publish(msg)
+    
+    def _process_status_msg (self, vid, msg):
+        ''' process status msg'''
         self.mqtt.publish(msg)
     
     def close (self):

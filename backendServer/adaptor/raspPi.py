@@ -10,7 +10,6 @@ import logging
 import time
 import pathlib
 import threading
-import fnmatch
 import datetime as dt
 
 scriptPath = pathlib.Path(__file__).parent.resolve()
@@ -26,21 +25,19 @@ if DEBUG:
     FAKE_STAT = {
         'power': 0,
         'red': 0,
-        'green': 0,
         'amber': 0,
+        'green': 0,
     }
 else:
     import RPi.GPIO as GPIO
 CHN = {
     'power': 26,
     'red': 23,
-    'green': 25,
     'amber': 24,
+    'green': 25,
 }
 
 class RaspPiAdaptor(PluginModule):
-    subscribe_channels = []
-
     def __init__ (self, args, **kw) -> None:
         ''' init the module '''
         self.id = 'vid{}'.format(args.id)
@@ -49,6 +46,7 @@ class RaspPiAdaptor(PluginModule):
             'tester.{}.alert'.format(self.id),
         ]
         self.redis_conn = au.connect_redis_with_args(args)
+        self.alert = False
         if not DEBUG:
             GPIO.setwarnings(False)
             GPIO.setmode(GPIO)
@@ -59,11 +57,19 @@ class RaspPiAdaptor(PluginModule):
         PluginModule.__init__(self,
             redis_conn=self.redis_conn
         )
+        self.start_listen_bus()
         logging.debug('Init Raspberry Pi Adaptor with ID: {}'.format(self.id))
     
     def alert_switch_capture (self):
         ''' alert switch capture thread'''
         while True:
+
+            '''
+                FIXME insert reading of switch GPIO
+                if GPIO detect press, but self.alert is False, call _process_alert_msg({'stage': 'alert', 'status': 'activated'}, bySwitch=True)
+                if GPIO detect press, but self.alert is True, call
+                _alert_reset()
+            '''
 
             if self.th_quit.is_set():
                 break
@@ -100,19 +106,49 @@ class RaspPiAdaptor(PluginModule):
         )
         logging.debug('Init Power {}'.format(_status))
     
-    def _stage_begin_capture (self, msg):
-        ''' process begin capture message'''
+    def _stage_change (self, msg, chns={}):
+        ''' process begin capture & test screen & pop up 
+            chns format should be: {'key': 'low'|'high' ... }
+        '''
         _status = msg.get('status', 'failed')
+        _stage = msg.get('stage', 'error')
+        if _stage == 'error':
+            logging.error('Unable to determine stage {}'.format(_stage))
+            return
         if _status == 'success':
-            _res = True
-            for chn in ['red', 'green', 'amber']:
-                self.set_gpio_status(chn, 'low')
-                if _res:
-                    _res = True is self.get_gpio_status(chn) == 0 else False
+            _result = True
+            for chn, val in chns.items():
+                self.set_gpio_status(chn, val)
+                _out = 'low' if self.get_gpio_status(chn) == 0 else 'high'
+                if _out != val: 
+                    _result = False
+                logging.debug('[{}]: LED {} set to {}: {}'.format(_stage, chn, val, _result))
+            if _result: self.alert = True
+            self.redis_conn.publish(
+                'tester.{}.response'.format(self.id),
+                json2str({
+                    'stage': _stage, 
+                    'status': 'success' if _result else 'failed',
+                    })
+            )
+            logging.debug('[{}] response: {}'.format(_stage, 'success' if _result else 'failed'))
     
-                
-
-
+    def alert_reset (self):
+        ''' reset alert when self.alert == True and switch pressed'''
+        _result = True
+        self.set_gpio_status('amber', 'low')
+        _out = 'low' if self.get_gpio_status('amber') == 0 else 'high'
+        if _out != 'low': _result = False
+        logging.debug('[alert-reset]: LED amber set to low: {}'.format(_result))
+        if _result: self.alert = False
+        self.redis_conn.publish(
+            'tester.{}.alert-response'.format(self.id),
+            json2str({
+                'stage': 'alert-reset',
+                'status': 'success' if _result else 'failed',
+            })
+        )
+        logging.debug('[alert-reset] response: {}'.format('success' if _result else 'failed',))
 
     def process_redis_msg (self, ch, msg):
         ''' process redis message'''
@@ -126,11 +162,37 @@ class RaspPiAdaptor(PluginModule):
         ''' process normal result msg'''
         _stage = msg.get('stage', 'error')
         if _stage == 'beginCapture':
-            self._stage_begin_capture(msg)
+            self._stage_change(msg, chns={'red': 'low', 'amber': 'low', 'green': 'low'})
+        elif _stage == 'testScreen':
+            self._stage_change(msg, chns={'red', 'high'})
+        elif _stage == 'popUp':
+            self._stage_change(msg, chns={'green': 'high'})
 
-    def _process_alert_msg (self, msg):
+    def _process_alert_msg (self, msg, bySwitch=False):
         ''' process alert msg '''
-        pass
+        _status = msg.get('status', 'deactivate')
+        _stage = msg.get('stage', 'error')
+        if _stage == 'error':
+            logging.error('Unable to determine stage {}'.format(_stage))
+            return
+        if _status == 'activated':
+            _result = True
+            self.set_gpio_status('amber', 'high')
+            '''
+                FIXME: insert servo motor rotation
+            '''
+            _out = 'low' if self.get_gpio_status('amber') == 0 else 'high'
+            if _out != 'high':
+                _result = False
+            logging.debug('[{}]: LED amber set to high: {}'.format(_stage, _result))
+            self.redis_conn.publish(
+                'tester.{}.alert-response'.format(self.id),
+                json2str({
+                    'stage': 'alert-switch' if bySwitch else 'alert-msg', 
+                    'status': 'success' if _result else 'failed',
+                    })
+            )
+            logging.debug('[{}] response: {}'.format(_stage, 'success' if _result else 'failed'))        
 
     def start (self):
         ''' start raspberry pi module '''
@@ -188,5 +250,7 @@ if __name__ == '__main__':
         while not rpa.is_quit(1):
             pass
     except KeyboardInterrupt:
-        #GPIO.cleanup()
+        if not DEBUG:
+            GPIO.cleanup()
         rpa.mod_close()
+        rpa.close()
