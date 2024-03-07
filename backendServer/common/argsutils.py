@@ -6,6 +6,7 @@ argparse utilities
 '''
 
 import logging
+import re
 
 def add_arg(x, *arg, **kw):
     ''' convenient routine to provide shorthands to kwargs of argparse.add_arguments().
@@ -44,6 +45,7 @@ def add_redis_args(parser, groupname="Redis configuration parameters", host='loc
 
 def connect_redis_with_args(args, return_pool=False):
     ''' connect to redis bus based on the parsed input args '''
+    logging.debug("Connecting to redis {}:{} ...".format(args.redis_host, args.redis_port))
     import redis
     pool = redis.ConnectionPool(
         host = args.redis_host,
@@ -52,12 +54,12 @@ def connect_redis_with_args(args, return_pool=False):
         password = args.redis_passwd, 
         decode_responses = not args.redis_no_decode)
     conn = redis.Redis(connection_pool=pool)
-    logging.debug("connecting to redis {}:{} ...".format(args.redis_host, args.redis_port))
+    logging.debug('Redis {}:{} connected ... '.format(args.redis_host, args.redis_port))
     if return_pool:
         return pool, conn
     return conn
 
-def add_mongo_args(parser, groupname="MongoDB configuration parameters", host='localhost', port=27017, user=None, passwd=None, db='ewaic-bocspace'):
+def add_mongo_args(parser, groupname="MongoDB configuration parameters", host='localhost', port=27017, user=None, passwd=None, db='mockup_db'):
     ''' add in arguments related to mongo '''
     g = parser.add_argument_group(groupname)
     add_arg(g, "--mongo-host", t=str, h="hostname/IP of the mongo server {D}", d=host, m='HOST')
@@ -83,7 +85,16 @@ def connect_mongodb_with_args(args, return_client=False):
         return mongoclient, mongoclient[args.mongo_db]
     return mongoclient[args.mongo_db]
 
-def init_parser (description='Smart Intgrated Solution Platform', mongo=None, redis=None):
+def add_sql_args(parser, groupname="SQL configuration parameters", host='localhost', port=8883, user='root', passwd='ew@icSG23', db='kajima_db'):
+    g = parser.add_argument_group(groupname)
+    add_arg(g, "--sql-host", t=str, h="hostname/IP of SQL server {D}", d=host, m='HOST')
+    add_arg(g, "--sql-port", t=int, h="port number of SQL server {D}", d=port, m="PORT")
+    add_arg(g, "--sql-user", t=str, h="username for SQL authentication {D}", d=user, m='USER')
+    add_arg(g, "--sql-passwd", t=str, h="password of the SQL authentication {D}", d=passwd, m='PASSWD')
+    add_arg(g, "--sql-db", t=str, h="databse name to use for SQL {D}", d=db, m='DB')
+    return g
+
+def init_parser (description='Smart Intgrated Solution Platform', mongo=None, redis=None, sql=None):
     ''' initializes argument parser with common set of options
         if mongo is not None, add_mongo_args() will be called to add mongo related options
         if redis is not None, add_redis_args() will be called to add redis related options
@@ -96,6 +107,10 @@ def init_parser (description='Smart Intgrated Solution Platform', mongo=None, re
         add_mongo_args(parser, **mongo)
     elif mongo is not None:
         add_mongo_args(parser)
+    if isinstance(sql, dict):
+        add_sql_args(parser, **sql)
+    else:
+        add_sql_args(parser)
     if isinstance(redis, dict):
         add_redis_args(parser, **redis)
     elif redis is not None:
@@ -141,3 +156,17 @@ def parse_args(parser, args=None, conn_redis=False, conn_mongo=False,
     if conn_mongo:
         return args, connect_mongodb_with_args(args)
     return args
+
+def to_namespace(dict):
+    from argparse import Namespace
+    if len(dict.keys()) == 1:
+        return Namespace(**dict)
+    else:
+        _dict = {}
+        for key, contain in dict.items():
+            for field, value in contain.items():
+                if not field in _dict:
+                    _dict[field] = value
+                else:
+                    logging.error('Duplicate key when converting dict to namespace {} == {}-{}'.format(field, key, field))
+        return Namespace(**_dict)

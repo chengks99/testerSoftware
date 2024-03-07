@@ -28,10 +28,11 @@ class TesterSoftwareServer(PluginModule):
 
     # processing module base
     component_name = 'TESTER'
-    subscribe_channels = ['tester.*.response', 'tester.*.alert-response']
+    subscribe_channels = ['tester.*.response', 'tester.*.alert-response', 'tester.*.status']
 
     def __init__ (self, args, **kw) -> None:
         self.redis_conn = au.connect_redis_with_args(args)
+        self.args = args
         self.housekeep_period = kw.pop('housekeep_period', 150)
         self.cfg = {}
         self.plugins = {}
@@ -60,7 +61,7 @@ class TesterSoftwareServer(PluginModule):
         self.load_plugin_modules(**extra_kw)
 
         self.start_listen_bus()
-        self.start_thred('housekeep', self.housekeep)
+        self.start_thread('housekeep', self.housekeep)
         self.save_info()
 
     def close (self):
@@ -79,7 +80,7 @@ class TesterSoftwareServer(PluginModule):
             read configuration file and split configuration to cfg and plugins
             for plugin details in config file, it should start section by [plugin-(PLUGIN_NAME)]
         '''
-        cfg_file = scriptpath.parent / file_path
+        cfg_file = scriptPath.parent / file_path
         if cfg_file.is_file():
             config = configparser.ConfigParser()
             config.read(cfg_file)
@@ -106,33 +107,55 @@ class TesterSoftwareServer(PluginModule):
             logging.error('Unable to locate config file at {}'.format(str(cfg_file)))
             self.close()
     
+    def process_redis_msg (self, ch, msg):
+        ''' redis message listener'''
+        if fnmatch.fnmatch(ch, 'tester.*.response'):
+            self._process_response_msg(ch.split('.')[1], msg)
+        elif fnmatch.fnmatch(ch, 'tester.*.alert-response'):
+            self._process_alert_response_msg(ch.split('.')[1], msg)
+        elif fnmatch.fnmatch(ch, 'tester.*.status'):
+            self._process_status_msg(ch.split('.')[1], msg)
+
+    def _process_response_msg (self, vid, msg):
+        ''' process normal response msg'''
+        logging.debug('Received Response from {}: {}'.format(vid, msg))
+
+    def _process_alert_response_msg (self, vid, msg):
+        ''' process alert response msg '''
+        logging.debug('Received Alert-Response from {}: {}'.format(vid, msg))
+
+    def _process_status_msg (self, vid, msg):
+        ''' process tester status msg '''
+        logging.debug('Received Status from {}: {}'.format(vid, msg))
+
     def load_plugin_modules (self, **extra_kw):
         ''' load each plugin module and initialize them '''
         import importlib.util
         # get all enabled plugin modules and import each of them
-        module_name = lambda m: 'procmod_' + m['_id'].replace('-', '_')
+        module_name = lambda m: 'procmod_' + m.replace('-', '_')
         self.plugin_modules = []
         cwd = scriptPath.parent / 'server'
         for key, val in self.plugins.items():
-            _path = val.get('path', None)
-            if _path is None:
-                logging.debug('Plugin Module {} no path found'.format(key))
-                continue
+            if val.get('enabled', False):
+                _path = val.get('path', None)
+                if _path is None:
+                    logging.debug('Plugin Module {} no path found'.format(key))
+                    continue
 
-            _fpath = cwd / _path
-            if not _fpath.is_file():
-                logging.error('Plugin file not found: {}'.format(str(_fpath)))
-                continue
-            
-            spec = importlib.util.spec_from_file_location(module_name(key), str(fpath))
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            self.plugin_modules.append(
-                module.load_processing_module(
-                    self.redis_conn, self.db, au.to_namespace(self.cfg), **extra_kw
+                _fpath = cwd / _path
+                if not _fpath.is_file():
+                    logging.error('Plugin file not found: {}'.format(str(_fpath)))
+                    continue
+                
+                spec = importlib.util.spec_from_file_location(module_name(key), str(_fpath))
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                self.plugin_modules.append(
+                    module.load_processing_module(
+                        self.redis_conn, self.cfg, **extra_kw
+                    )
                 )
-            )
-            logging.info('processing module {} loaded'.format(key))
+                logging.info('processing module {} loaded'.format(key))
 
 if __name__ == "__main__":
     parser = au.init_parser('Tester Server', redis={})

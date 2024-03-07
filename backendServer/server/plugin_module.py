@@ -17,9 +17,8 @@ class PluginModule(SISPComponentBase):
     component_name = 'base-module'
     subscribe_channels = ['adaptor.*.status', 'web.*.config']
 
-    def __init__(self, redis_conn, db, **kw):
+    def __init__(self, redis_conn, **kw):
         self.site = kw.get('site', 'EWAIC-BocSpace')
-        self.mongodb = db
         self.standalone = kw.get('standalone', False)
         SISPComponentBase.__init__(self, redis_conn=redis_conn, **kw)
         self._quit_ch = ['BSP.quit']

@@ -2,12 +2,10 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import sys
 import ssl
+import sys
 import json
-import base64
-
-import datetime as dt
+import fnmatch
 
 try:
     from paho.mqtt import client as mqtt_client
@@ -20,14 +18,11 @@ from pathlib import Path
 scriptpath = Path(__file__).parent.resolve()
 sys.path.append(str(scriptpath.parent / 'common'))
 
-from jsonutils import json2str
-from sqlwrapper import SQLDatabase
-
 class MQTTBroker(object):
     def __init__ (self, args) -> None:
-        self.broker = args.broker
-        self.port = args.port
-        self.topic = args.topic
+        self.broker = args.get('broker', '')
+        self.port = args.get('port', -1)
+        self.topic = args.get('topic', '')
         if not self.__get_cert_path(args):
             logging.error('Unable to get all certificate files')
             exit(1)
@@ -37,11 +32,11 @@ class MQTTBroker(object):
         self._start()
 
     def __get_cert_path (self, args):
-        _certDir = args.cert
+        _certDir = args.get('cert', '')
         self.cert = {
-            'cert': scriptpath.parent / _certDir / args.pemcert,
-            'key': scriptpath.parent / _certDir /  args.pemkey,
-            'ca': scriptpath.parent / _certDir /  args.pemca,
+            'cert': scriptpath.parent / _certDir / args.get('pemcert', ''),
+            'key': scriptpath.parent / _certDir /  args.get('pemkey', ''),
+            'ca': scriptpath.parent / _certDir /  args.get('pemca', ''),
         }
 
         for k, v in self.cert.items():
@@ -113,4 +108,31 @@ class MQTTForwarding(PluginModule):
 
     def __init__ (self, redis_conn, args, **kw):
         self.redis_conn = redis_conn
-        
+        self.topic = args.get('topic', '')
+        self.mqtt = MQTTBroker(args=args)
+    
+    def process_redis_msg (self, ch, msg):
+        ''' redis message listener'''
+        if ch in self.subscribe_channels:
+            if fnmatch.fnmatch(ch, 'tester.*.response'):
+                self._process_response_msg(ch.split('.')[1], msg)
+            elif fnmatch.fnmatch(ch, 'tester.*.alert-response'):
+                self._process_alert_response_msg(ch.split('.')[1], msg)
+    
+    def _process_response_msg (self, vid, msg):
+        ''' process normal response msg'''
+        self.mqtt.publish(msg)
+
+    def _process_alert_response_msg (self, vid, msg):
+        ''' process alert response msg '''
+        self.mqtt.publish(msg)
+    
+    def close (self):
+        self.mqtt.close()
+        PluginModule.close(self)
+
+def load_processing_module (*a, **kw):
+    return MQTTForwarding(*a, **kw)
+
+if __name__ == "__main__":
+    raise Exception('This module must start with server')        
