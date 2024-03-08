@@ -9,7 +9,7 @@ Code containing below functions:
 Run below command to start server:
 
 ```python
-python3 backend/backend-server.py --redis-host [redis_server_IP] -d
+python3 server/backend-server.py --redis-host [redis_server_IP] -d
 ```
 
 At Raspberry Pi, run below command to start adaptor code
