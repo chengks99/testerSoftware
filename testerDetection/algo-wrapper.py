@@ -97,7 +97,7 @@ class AlgoWrapper(PluginModule):
         ''' process begin capture response msg, make sure test screen ready '''
         _status = msg.get('status', 'failed')
         if _status == 'success':
-            self.algo.start_test_screen()
+            self.algo.capture_test_screen()
         else:
             logging.error('Begin Capture process failed ...')
 

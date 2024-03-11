@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-import time
+import datetime as dt
 
 import threading
 import sys
@@ -10,13 +10,20 @@ scriptPath = pathlib.Path(__file__).parent.resolve()
 sys.path.append(str(scriptPath.parent / 'common'))
 from jsonutils import json2str
 
+DET_TYPE = [
+    {'frame_threshold': 5, 'threshold': 150},
+    {'frame_threshold': 30, 'threshold': 150},
+    {'frame_threshold': 5, 'threshold': 50},
+]
+
 class TesterDetection(object):
-    def __init__(self, redis_conn, id, detectionType=1) -> None:
+    def __init__(self, redis_conn, id, detectionType=1, displayVid=False) -> None:
         ''' init tester detection module'''
         self.redis_conn = redis_conn
         self.detType = detectionType
+        self.display_video = displayVid
         self.id = id
-        self.alert = False
+        self.stage = 'idle'
 
         logging.debug('Tester Detection Module start and wait for initialization command')
 
@@ -24,7 +31,9 @@ class TesterDetection(object):
         ''' load necessary configuration '''
 
         CAPTURE_DONE = False
-        ''' FIXME: load parameter/configuration'''
+        self.frame_threshold = DET_TYPE[self.detType]['frame_threshold']
+        self.threshold = DET_TYPE[self.detType]['threshold']
+        CAPTURE_DONE = True
 
         logging.debug('Configuration setting successed: {}'.format(CAPTURE_DONE))
         self.redis_conn.publish(
@@ -35,11 +44,25 @@ class TesterDetection(object):
             })
         )
 
-    def capture_test_screen (self):
-        ''' capture test screen '''
+    # FIXME: test screen detection
+    def __test_screen_detection (self, frame):
+        ''' detect test screen, return True if test screen detected, false otherwise'''
+        return False
 
+    def capture_test_screen (self, timeout=10):
+        ''' capture test screen '''
         TEST_READY = False
-        ''' FIXME: capture image and make sure test screen ready '''
+        _cap = cv2.VideoCapture(0)
+        currTime = dt.datetime.now()
+        stopTime = currTime + dt.timedelta(seconds=timeout)
+        while not TEST_READY:
+            _, _frame = _cap.read()
+            TEST_READY = self.__test_screen_detection(_frame)
+            if self.display_video: cv2.imshow('testScreen', _frame)
+            _now = dt.datetime.now()
+            if _now > stopTime: break
+        _cap.release()
+        if self.display_video: cv2.destroyAllWindows()
 
         logging.debug('Configuration setting successed: {}'.format(TEST_READY))
         self.redis_conn.publish(
@@ -50,19 +73,68 @@ class TesterDetection(object):
             })
         )
     
+    # FIXME: pop up detection
+    def __popup_detection (self, frame):
+        ''' detect pop up, True if pop up detected, False otherwise '''
+        return False
+
+    # FIXME: user interaction detection
+    def __interaction_detection (self, frame):
+        ''' detect user interfaction, True if detected, False otherwise '''
+        return False
+    
     def _mask_compare (self):
         ''' masking and comparison thread '''
+        _cap = cv2.VideoCapture(0)
+        popUp = False
+        alertTime = None
         while True:
-
-            ''' 
-                FIXME: start getting image, mask and compare the image
-                FIXME: once detected call redis_conn to send out the result
-                FIXME: stage should be popup | alert based on detection stage
-                FIXME: if alert is True, start counting 5s to check interaction
-            '''
-
+            _, _frame = _cap.read()
+            if self.stage == 'reset': 
+                popUp = False
+                self.stage = 'idle'
+            if not popUp:
+                popUp = self.__popup_detection(_frame)
+            if popUp:
+                if self.stage == 'idle':
+                    self.redis_conn.publish(
+                        'tester.{}.result'.format(self.id),
+                        json2str({
+                            'stage': 'popUp',
+                            'status': 'success'
+                        })
+                    )
+                    alertTime = dt.datetime.now()
+                    self.stage = 'preAlert'
+                elif self.stage == 'preAlert':
+                    interaction = self.__interaction_detection(_frame)
+                    if interaction:
+                        self.stage = 'reset'
+                        self.redis_conn.publish(
+                            'tester.{}.result'.format(self.id),
+                            json2str({
+                                'stage': 'testScreen',
+                                'status': 'success'
+                            })
+                        )
+                    else:
+                        _now = dt.datetime.now()
+                        _diff = _now - alertTime
+                        if _diff.total_seconds() > 5:
+                            self.stage = 'alert'
+                            self.redis_conn.publish(
+                                'tester.{}.result'.format(self.id),
+                                json2str({
+                                    'stage': 'alert',
+                                    'status': 'activated'
+                                })
+                            )
+            if self.display_video: cv2.imshow('Masking', _frame)
             if self.th_quit.is_set():
                 break
+        _cap.release()
+        if self.display_video: cv2.destroyAllWindows()
+        logging.debug('Masking & Comparison stopped'))
 
     def start_mask_compare (self):
         ''' start masking and compare '''
@@ -72,9 +144,10 @@ class TesterDetection(object):
     
     def set_alert_stage (self, stage, status=False):
         ''' setting of alert stage '''
-        self.alert = status
+        if status:
+            self.stage = 'reset'
         _stage = 'Detection' if stage == 'alert-msg' else 'Switch'
-        logging.debug('Alert set to {} by {}'.format(self.alert, _stage))
+        logging.debug('Alert set to {} by {}'.format(self.stage, _stage))
     
     def close (self):
         self.th_quit.set()
@@ -247,3 +320,36 @@ if __name__ == "__main__":
     ui_check = '/Users/juneyoungseo/Documents/Panasonic/test videos/2023-12-26 10-36-47-ex2 SDU CT Tester.mp4'
     # test_screen(tester_check)
     change_detection(ui_check)
+
+    def capture_test_screen(self, nonzero_pixels, full_screen_change):
+        ''' capture test screen '''
+
+        TEST_READY = False  # Initialize the flag before entering the loop
+
+        while True:
+            ret, current_frame = self.cap.read()
+            if not ret: continue
+
+            current_frame_gray = cv2.cvtColor(current_frame, cv2.COLOR_BGR2GRAY)
+            frame_diff = cv2.absdiff(current_frame_gray, self.prev_frame_gray)
+            _, thresh_diff = cv2.threshold(frame_diff, self.threshold, 255, cv2.THRESH_BINARY)
+
+            nonzero_pixels = cv2.countNonZero(thresh_diff)
+            full_screen_change = (self.frame_width * self.frame_height) * 0.5
+
+            contours, _ = cv2.findContours(thresh_diff, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            significant_change_detected = any(cv2.contourArea(contour) > self.min_area for contour in contours)
+
+            self.capture_test_screen(nonzero_pixels, full_screen_change)
+
+            # Check if TEST_READY has been turned True, then break the loop
+            if TEST_READY:
+                # Prepare and send out the Redis message before breaking
+                self.redis_conn.publish(
+                    'tester.{}.result'.format(self.id),
+                    json2str({
+                        'stage': 'popup' if significant_change_detected else 'alert',  # or your specific logic here
+                        'status': 'success' if TEST_READY else 'failed'
+                    })
+                )
+                break  # Exit the loop

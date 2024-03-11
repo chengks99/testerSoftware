@@ -164,9 +164,9 @@ class RaspPiAdaptor(PluginModule):
         if _stage == 'beginCapture':
             self._stage_change(msg, chns={'red': 'low', 'amber': 'low', 'green': 'low'})
         elif _stage == 'testScreen':
-            self._stage_change(msg, chns={'red', 'high'})
+            self._stage_change(msg, chns={'red': 'high', 'amber': 'low', 'green': 'low'})
         elif _stage == 'popUp':
-            self._stage_change(msg, chns={'green': 'high'})
+            self._stage_change(msg, chns={'red': 'high', 'amber': 'low', 'green': 'high'})
 
     def _process_alert_msg (self, msg, bySwitch=False):
         ''' process alert msg '''
