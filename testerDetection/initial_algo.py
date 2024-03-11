@@ -134,7 +134,7 @@ class TesterDetection(object):
                 break
         _cap.release()
         if self.display_video: cv2.destroyAllWindows()
-        logging.debug('Masking & Comparison stopped'))
+        logging.debug('Masking & Comparison stopped')
 
     def start_mask_compare (self):
         ''' start masking and compare '''

@@ -13,7 +13,7 @@ import pathlib
 import threading
 
 from plugin_module import PluginModule
-from TesterDetection import TesterDetection
+from initial_algo import TesterDetection
 
 scriptPath = pathlib.Path(__file__).parent.resolve()
 sys.path.append(str(scriptPath.parent / 'common'))
