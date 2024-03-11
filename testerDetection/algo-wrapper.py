@@ -10,6 +10,7 @@ import pathlib
 import threading
 
 from plugin_module import PluginModule
+from initial_algo import TesterDetection
 
 scriptPath = pathlib.Path(__file__).parent.resolve()
 sys.path.append(str(scriptPath.parent / 'common'))
@@ -33,14 +34,14 @@ class AlgoWrapper(PluginModule):
         self.start_listen_bus()
         logging.debug('Init Algo Wrapper with ID: {}'.format(self.id))
     
-    def start (self):
-        ''' start wrapper '''
+    def start_thread (self):
+        ''' start wrapper in thread'''
         self.th_quit = threading.Event()
         self.th = threading.Thread(target=self.wrapper)
         self.th.start()
     
-    def wrapper (self):
-        ''' wrapper to start algo code in thread'''
+    def wrapper_thread (self):
+        ''' wrapper thread to start algo code in thread'''
         while True:
             if self.algo is None:
                 '''
@@ -53,6 +54,10 @@ class AlgoWrapper(PluginModule):
                     FIXME: call close to the algo class
                 '''
                 break
+    
+    def start (self):
+        ''' start wrapper '''
+        self.algo = TesterDetection(self.redis_conn, self.id)
     
     def process_redis_msg (self, ch, msg):
         ''' process redis msg '''
@@ -80,35 +85,50 @@ class AlgoWrapper(PluginModule):
         else:
             self._response_alert(msg)
     
-    '''
-        FIXME: fill in operation for all response msg
-    '''
     def _response_init (self, msg):
-        ''' process init stage '''
+        ''' process init response stage '''
         _status = msg.get('status', 'failed')
         if _status == 'success':
-            #FIXME call self.algo to process capture image
-            #FIXME if self.algo success to start image capture, publish redis msg
-            self.redis_conn.publish(
-                'tester.{}.result'.format(self.id),
-                json2str({
-                    'stage': 'beginCapture',
-                    'status': 'success'
-                })
-            )
+            self.algo.load_configuration()
+        else:
+            logging.error('Initialization process failed ... ')
 
     def _response_begin_capture (self, msg):
-        pass
+        ''' process begin capture response msg, make sure test screen ready '''
+        _status = msg.get('status', 'failed')
+        if _status == 'success':
+            self.algo.start_test_screen()
+        else:
+            logging.error('Begin Capture process failed ...')
 
     def _response_test_screen (self, msg):
-        pass
+        ''' process test screen response msg, start masking and comparison'''
+        _status = msg.get('status', 'failed')
+        if _status == 'success':
+            self.algo.start_mask_compare()
+        else:
+            logging.error('Test screen process failed ...')
 
     def _respone_alert_reset (self, msg):
-        pass
+        ''' process alert reset '''
+        _status = msg.get('status', 'failed')
+        if _status == 'success':
+            self.algo.set_alert_stage(msg.get('stage', 'alert-reset'), stage=True)
+        else:
+            logging.error('Alert reset failed ...')
 
     def _response_alert (self, msg):
-        pass
+        ''' process alert response msg '''
+        _status = msg.get('status', 'failed')
+        if _status == 'success':
+            self.algo.set_alert_stage(msg.get('stage', 'alert-msg'), stage=True)
+        else:
+            logging.error('Alert setting failed ...')
     
+    def algo_close_thread (self):
+        ''' close algo thread '''
+        self.algo.close()
+
     def algo_close (self):
         ''' close the module '''
         self.th_quit.set()

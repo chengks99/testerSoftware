@@ -2,6 +2,84 @@ import cv2
 import numpy as np
 import time
 
+import threading
+import sys
+import logging
+import pathlib
+scriptPath = pathlib.Path(__file__).parent.resolve()
+sys.path.append(str(scriptPath.parent / 'common'))
+from jsonutils import json2str
+
+class TesterDetection(object):
+    def __init__(self, redis_conn, id, detectionType=1) -> None:
+        ''' init tester detection module'''
+        self.redis_conn = redis_conn
+        self.detType = detectionType
+        self.id = id
+        self.alert = False
+
+        logging.debug('Tester Detection Module start and wait for initialization command')
+
+    def load_configuration(self):
+        ''' load necessary configuration '''
+
+        CAPTURE_DONE = False
+        ''' FIXME: load parameter/configuration'''
+
+        logging.debug('Configuration setting successed: {}'.format(CAPTURE_DONE))
+        self.redis_conn.publish(
+            'tester.{}.result'.format(self.id),
+            json2str({
+                'stage': 'beginCapture',
+                'status': 'success' if CAPTURE_DONE else 'failed'
+            })
+        )
+
+    def capture_test_screen (self):
+        ''' capture test screen '''
+
+        TEST_READY = False
+        ''' FIXME: capture image and make sure test screen ready '''
+
+        logging.debug('Configuration setting successed: {}'.format(TEST_READY))
+        self.redis_conn.publish(
+            'tester.{}.result'.format(self.id),
+            json2str({
+                'stage': 'testScreen',
+                'status': 'success' if TEST_READY else 'failed'
+            })
+        )
+    
+    def _mask_compare (self):
+        ''' masking and comparison thread '''
+        while True:
+
+            ''' 
+                FIXME: start getting image, mask and compare the image
+                FIXME: once detected call redis_conn to send out the result
+                FIXME: stage should be popup | alert based on detection stage
+                FIXME: if alert is True, start counting 5s to check interaction
+            '''
+
+            if self.th_quit.is_set():
+                break
+
+    def start_mask_compare (self):
+        ''' start masking and compare '''
+        self.th_quit = threading.Event()
+        self.th = threading.Thread(target=self._mask_compare)
+        self.th.start()
+    
+    def set_alert_stage (self, stage, status=False):
+        ''' setting of alert stage '''
+        self.alert = status
+        _stage = 'Detection' if stage == 'alert-msg' else 'Switch'
+        logging.debug('Alert set to {} by {}'.format(self.alert, _stage))
+    
+    def close (self):
+        self.th_quit.set()
+
+
 def video_capture(file):
     #video capture
     cap = cv2.VideoCapture(file)
