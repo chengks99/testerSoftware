@@ -6,13 +6,7 @@ Code containing below functions:
 * GPIO Plugin Module
 
 ### Operation
-Run below command to start server:
-
+At Raspberry Pi, run below command to start controller
 ```python
-python3 server/backend-server.py --redis-host [redis_server_IP] -d
-```
-
-At Raspberry Pi, run below command to start adaptor code
-```python
-python3 adaptor/raspPi.py --redis-host [redis_server_IP] -d
+python3 server/raspi-control.py --redis-host [redis_server_IP] -d
 ```
