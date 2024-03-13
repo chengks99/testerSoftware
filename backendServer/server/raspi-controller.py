@@ -292,6 +292,7 @@ class RaspPiController(PluginModule):
             logging.debug('[{}] response: {}'.format(_stage, 'success' if _result else 'failed'))
       
     def set_gpio_status (self, chn, stat):
+        ''' set single gpio status '''
         if DEBUG:
             _stat = 0 if stat == 'low' else 1
             FAKE_STAT[chn] = _stat
