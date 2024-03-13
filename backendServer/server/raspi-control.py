@@ -8,6 +8,7 @@ This is adaptor for Raspberry PI GPIO controller
 import sys
 import logging
 import time
+import configparser
 import pathlib
 import threading
 import datetime as dt
@@ -58,13 +59,13 @@ class RaspPiAdaptor(PluginModule):
             GPIO.setwarnings(False)
             GPIO.setmode(GPIO)
             for chn, pin in CHN.items:
-                GPIO.setup(pin, GPIO.out)
+                GPIO.setup(pin, GPIO.OUT)
                 logging.debug('Set {} pin {} as output'.format(chn, pin))
             for chn, pin in ALERT_IN.items:
-                GPIO.setup(pin, GPIO.in)
+                GPIO.setup(pin, GPIO.IN)
                 logging.debug('Set {} pin {} as alert input'.format(chn, pin))
             for chn, pin in ALERT_OUT.items:
-                GPIO.setup(pin, GPIO.out)
+                GPIO.setup(pin, GPIO.OUT)
                 logging.debug('Set {} pin {} as alert output'.format(chn, pin))
 
         logging.debug('Init Raspberry Pi Adaptor with ID: {}'.format(self.id))
@@ -141,7 +142,7 @@ class RaspPiAdaptor(PluginModule):
                 )
                 logging.info('processing module {} loaded'.format(key))
 
-    def start (self):
+    def start (self, **extra_kw):
         ''' start raspberry pi module '''
         self.load_system_configuration(self.args.cfg)
         PluginModule.__init__(self,
@@ -186,14 +187,17 @@ class RaspPiAdaptor(PluginModule):
     def alert_switch_capture (self):
         ''' alert switch capture thread'''
         while True:
-
-            '''
-                FIXME insert reading of switch GPIO
-                if GPIO detect press, but self.alert is False, call _process_alert_msg({'stage': 'alert', 'status': 'activated'}, bySwitch=True)
-                if GPIO detect press, but self.alert is True, call
-                _alert_reset()
-            '''
-
+            if not DEBUG:
+                if GPIO.input(ALERT_IN['alert']) == GPIO.HIGH:
+                    if self.alert:
+                        logging.debug('Switch pressed to reset alert')
+                        self.alert_reset()
+                    else:
+                        logging.debug('Switch pressed to enable alert')
+                        self._process_alert_msg(
+                            {'stage': 'alert', 'status': 'activated'},
+                            bySwitch=True
+                        )
             if self.th_quit.is_set():
                 break
     
@@ -244,9 +248,9 @@ class RaspPiAdaptor(PluginModule):
         if _status == 'activated':
             _result = True
             self.set_gpio_status('amber', 'high')
-            '''
-                FIXME: insert servo motor rotation
-            '''
+            
+            self._servo_change()
+
             _out = 'low' if self.get_gpio_status('amber') == 0 else 'high'
             if _out != 'high':
                 _result = False
@@ -308,7 +312,25 @@ class RaspPiAdaptor(PluginModule):
         for chn in CHN.keys():
             _dict[chn] = 'on' if self.get_gpio_status(chn) == 1 else 'off'
         return _dict
-        
+    
+    def _servo_change (self):
+        ''' change server stage when alert occured '''
+        if DEBUG:
+            logging.debug('Simulate servo rotation for alert accured')
+        else:
+            self.servo_th = threading.Thread(target=self.__alert_servo)
+            self.servo_th.start()   
+
+    def __alert_servo (self):
+        ''' thread for servo process when alert occured '''
+        a2d = lambda a : 100 - (2.5 + (12.0 - 2.5)/180*(a+90))
+
+        _pwm = GPIO.PWM(ALERT_OUT['pwm'], 50)
+        for d in [a2d(0), a2d(90), a2d(0)]:
+            _pwm.start(d)
+            time.sleep(2)
+        _pwm.stop()
+
     def alert_reset (self):
         ''' reset alert when self.alert == True and switch pressed'''
         _result = True
@@ -328,6 +350,8 @@ class RaspPiAdaptor(PluginModule):
   
     def mod_close (self):
         ''' close the module '''
+        if not DEBUG:
+            GPIO.cleanup()
         self.th_quit.set()
         self.stat_quit.set()
     
@@ -351,7 +375,5 @@ if __name__ == '__main__':
         while not rpa.is_quit(1):
             pass
     except KeyboardInterrupt:
-        if not DEBUG:
-            GPIO.cleanup()
         rpa.mod_close()
         rpa.close()
