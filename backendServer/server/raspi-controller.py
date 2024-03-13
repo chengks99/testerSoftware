@@ -44,7 +44,7 @@ ALERT_OUT = {
     'pwm': 18,
 }
 
-class RaspPiAdaptor(PluginModule):
+class RaspPiController(PluginModule):
     def __init__ (self, args, **kw) -> None:
         ''' init the module '''
         self.id = 'vid{}'.format(args.id)
@@ -368,12 +368,12 @@ if __name__ == '__main__':
     )
     args = au.parse_args(parser)
 
-    rpa = RaspPiAdaptor(args=args)
-    rpa.start()
+    rpi_ctrl = RaspPiController(args=args)
+    rpi_ctrl.start()
     
     try:
-        while not rpa.is_quit(1):
+        while not rpi_ctrl.is_quit(1):
             pass
     except KeyboardInterrupt:
-        rpa.mod_close()
-        rpa.close()
+        rpi_ctrl.mod_close()
+        rpi_ctrl.close()
