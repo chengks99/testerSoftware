@@ -8,6 +8,7 @@ This is adaptor for Raspberry PI GPIO controller
 import sys
 import logging
 import time
+import fnmatch
 import configparser
 import pathlib
 import threading
@@ -21,7 +22,7 @@ from jsonutils import json2str
 sys.path.append(str(scriptPath.parent / 'server'))
 from plugin_module import PluginModule
 
-DEBUG = True
+DEBUG = False
 if DEBUG:
     FAKE_STAT = {
         'power': 0,
@@ -47,6 +48,10 @@ ALERT_OUT = {
 class RaspPiController(PluginModule):
     def __init__ (self, args, **kw) -> None:
         ''' init the module '''
+        self.args = args
+        self.cfg = {}
+        self.plugins = {}
+        self.plugin_modules = []
         self.id = 'vid{}'.format(args.id)
         self.subscribe_channels = [
             'tester.{}.result'.format(self.id),
@@ -57,14 +62,14 @@ class RaspPiController(PluginModule):
         self.alert = False
         if not DEBUG:
             GPIO.setwarnings(False)
-            GPIO.setmode(GPIO)
-            for chn, pin in CHN.items:
+            GPIO.setmode(GPIO.BCM)
+            for chn, pin in CHN.items():
                 GPIO.setup(pin, GPIO.OUT)
                 logging.debug('Set {} pin {} as output'.format(chn, pin))
-            for chn, pin in ALERT_IN.items:
+            for chn, pin in ALERT_IN.items():
                 GPIO.setup(pin, GPIO.IN)
                 logging.debug('Set {} pin {} as alert input'.format(chn, pin))
-            for chn, pin in ALERT_OUT.items:
+            for chn, pin in ALERT_OUT.items():
                 GPIO.setup(pin, GPIO.OUT)
                 logging.debug('Set {} pin {} as alert output'.format(chn, pin))
 
@@ -153,9 +158,6 @@ class RaspPiController(PluginModule):
 
         self._init_power()
 
-        self.start_thread('housekeep', self.housekeep)
-        self.save_info()
-
         self.th_quit = threading.Event()
         self.th = threading.Thread(target=self.alert_switch_capture)
         self.th.start()
@@ -163,6 +165,9 @@ class RaspPiController(PluginModule):
         self.stat_quit = threading.Event()
         self.stat = threading.Thread(target=self.status_update)
         self.stat.start()
+        
+        self.start_thread('housekeep', self.housekeep)
+        self.save_info()
 
     def _init_power (self):
         ''' init power light and update status '''
@@ -198,6 +203,7 @@ class RaspPiController(PluginModule):
                             {'stage': 'alert', 'status': 'activated'},
                             bySwitch=True
                         )
+                    time.sleep(0.5)
             if self.th_quit.is_set():
                 break
     
@@ -235,6 +241,8 @@ class RaspPiController(PluginModule):
             self._stage_change(msg, chns={'red': 'low', 'amber': 'low', 'green': 'low'})
         elif _stage == 'testScreen':
             self._stage_change(msg, chns={'red': 'high', 'amber': 'low', 'green': 'low'})
+        elif _stage == 'idle':
+            self._stage_change(ms, chns={'red': 'low', 'amber': 'low', 'green': 'low'})
         elif _stage == 'popUp':
             self._stage_change(msg, chns={'red': 'high', 'amber': 'low', 'green': 'high'})
 
@@ -361,13 +369,11 @@ class RaspPiController(PluginModule):
         PluginModule.close(self)
 
 if __name__ == '__main__':
-    from adaptor import add_common_adaptor_args
-    parser = au.init_parser('Raspberry Pi GPIO Control')
-    add_common_adaptor_args(
-        parser,
-        id=1
-    )
+    parser = au.init_parser('Tester Server', redis={})
+    au.add_arg(parser, '--cfg', h='specify config file {D}', d='config.ini')
+    au.add_arg(parser, '--id', h='specify tester ID {D}', d='1')
     args = au.parse_args(parser)
+
 
     rpi_ctrl = RaspPiController(args=args)
     rpi_ctrl.start()
