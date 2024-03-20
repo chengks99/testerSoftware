@@ -19,9 +19,6 @@ sys.path.append(str(scriptPath.parent / 'common'))
 import argsutils as au
 from jsonutils import json2str
 
-sys.path.append(str(scriptPath.parent / 'server'))
-from plugin_module import PluginModule
-
 DEBUG = False
 if DEBUG:
     FAKE_STAT = {
@@ -86,75 +83,12 @@ class RaspPiController(PluginModule):
         })
         return r
 
-    def load_system_configuration (self, file_path):
-        '''
-            read configuration file and split configuration to cfg and plugins
-            for plugin details in config file, it should start section by [plugin-(PLUGIN_NAME)]
-        '''
-        cfg_file = scriptPath.parent / file_path
-        if cfg_file.is_file():
-            config = configparser.ConfigParser()
-            config.read(cfg_file)
-            for section in config.sections():
-                _params = None
-                if 'plugin' in section:
-                    if not section in self.plugins: self.plugins[section] = {}
-                    _params = self.plugins[section]
-                else:
-                    if not section in self.cfg: self.cfg[section] = {}
-                    _params = self.cfg[section]
-                
-                for key in config[section]:
-                    if 'port' in key:
-                        _params[key] = int(config[section][key])
-                    elif key == 'enabled':
-                        if fnmatch.fnmatch(config[section][key], '*rue'):
-                            _params[key] = True
-                        else:
-                            _params[key] = False
-                    else:
-                        _params[key] = config[section][key]
-        else:
-            logging.error('Unable to locate config file at {}'.format(str(cfg_file)))
-            self.close()
-
-    def load_plugin_modules (self, **extra_kw):
-        ''' load each plugin module and initialize them '''
-        import importlib.util
-        # get all enabled plugin modules and import each of them
-        module_name = lambda m: 'procmod_' + m.replace('-', '_')
-        self.plugin_modules = []
-        cwd = scriptPath.parent / 'server'
-        for key, val in self.plugins.items():
-            if val.get('enabled', False):
-                _path = val.get('path', None)
-                if _path is None:
-                    logging.debug('Plugin Module {} no path found'.format(key))
-                    continue
-
-                _fpath = cwd / _path
-                if not _fpath.is_file():
-                    logging.error('Plugin file not found: {}'.format(str(_fpath)))
-                    continue
-                
-                spec = importlib.util.spec_from_file_location(module_name(key), str(_fpath))
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                self.plugin_modules.append(
-                    module.load_processing_module(
-                        self.redis_conn, self.cfg, **extra_kw
-                    )
-                )
-                logging.info('processing module {} loaded'.format(key))
-
     def start (self, **extra_kw):
         ''' start raspberry pi module '''
-        self.load_system_configuration(self.args.cfg)
         PluginModule.__init__(self,
             redis_conn=self.redis_conn
         )
         self.start_listen_bus()
-        self.load_plugin_modules(**extra_kw)
 
         self._init_power()
 
@@ -165,9 +99,6 @@ class RaspPiController(PluginModule):
         self.stat_quit = threading.Event()
         self.stat = threading.Thread(target=self.status_update)
         self.stat.start()
-        
-        self.start_thread('housekeep', self.housekeep)
-        self.save_info()
 
     def _init_power (self):
         ''' init power light and update status '''
@@ -181,13 +112,6 @@ class RaspPiController(PluginModule):
                 })
         )
         logging.debug('Init Power {}'.format(_status))
-
-    def housekeep (self):
-        ''' housekeeping thread '''
-        while not self.is_quit(self.housekeep_period):
-            for mod in self.plugin_modules:
-                mod.housekeep()
-            PluginModule.housekeep(self)
 
     def alert_switch_capture (self):
         ''' alert switch capture thread'''
@@ -369,11 +293,13 @@ class RaspPiController(PluginModule):
         PluginModule.close(self)
 
 if __name__ == '__main__':
-    parser = au.init_parser('Tester Server', redis={})
-    au.add_arg(parser, '--cfg', h='specify config file {D}', d='config.ini')
-    au.add_arg(parser, '--id', h='specify tester ID {D}', d='1')
+    from adaptor import add_common_adaptor_args
+    parser = au.init_parser('Raspberry Pi GPIO Control')
+    add_common_adaptor_args(
+        parser,
+        id=1
+    )
     args = au.parse_args(parser)
-
 
     rpi_ctrl = RaspPiController(args=args)
     rpi_ctrl.start()
